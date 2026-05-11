@@ -2207,7 +2207,28 @@ export class BaileysStartupService extends ChannelStartupService {
       );
     }
 
-    if (!message['audio'] && !message['poll'] && !message['sticker'] && sender != 'status@broadcast') {
+    // Path pra textMessage com linkPreview (key 'text' em vez de 'conversation') —
+    // Baileys precisa de 'text' pra gerar extendedTextMessage com metadata de preview.
+    if (message['text']) {
+      return await this.client.sendMessage(
+        sender,
+        {
+          text: message['text'],
+          mentions,
+          linkPreview: linkPreview,
+          contextInfo: message['contextInfo'],
+        } as unknown as AnyMessageContent,
+        option as unknown as MiscMessageGenerationOptions,
+      );
+    }
+
+    if (
+      !message['audio'] &&
+      !message['poll'] &&
+      !message['sticker'] &&
+      !message['text'] &&
+      sender != 'status@broadcast'
+    ) {
       return await this.client.sendMessage(
         sender,
         {
