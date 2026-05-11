@@ -2209,12 +2209,6 @@ export class BaileysStartupService extends ChannelStartupService {
 
     // Path pra textMessage com linkPreview (key 'text' em vez de 'conversation')
     if (message['text']) {
-      console.log(
-        'LP-PATCH-V9-MARKER text-branch-reached lpType=' +
-          typeof linkPreview +
-          ' lpKeys=' +
-          (linkPreview && typeof linkPreview === 'object' ? Object.keys(linkPreview).join(',') : String(linkPreview)),
-      );
       return await this.client.sendMessage(
         sender,
         {
@@ -2377,6 +2371,39 @@ export class BaileysStartupService extends ChannelStartupService {
           linkPreview.jpegThumbnail = Buffer.from(linkPreview.jpegThumbnail, 'base64');
         } catch {
           delete linkPreview.jpegThumbnail;
+        }
+      }
+      // Upload da imagem pro CDN WhatsApp pra gerar preview GRANDE (highQualityThumbnail).
+      // Se nao conseguir, segue com jpegThumbnail = preview pequeno (fallback).
+      if (
+        linkPreview &&
+        typeof linkPreview === 'object' &&
+        !linkPreview.highQualityThumbnail &&
+        (linkPreview.thumbnailUrl || linkPreview.image || Buffer.isBuffer(linkPreview.jpegThumbnail))
+      ) {
+        try {
+          const imageInput =
+            linkPreview.thumbnailUrl || linkPreview.image
+              ? { url: linkPreview.thumbnailUrl || linkPreview.image }
+              : linkPreview.jpegThumbnail;
+          const prep: any = await prepareWAMessageMedia(
+            { image: imageInput } as any,
+            {
+              upload: this.client.waUploadToServer,
+              mediaTypeOverride: 'thumbnail-link' as any,
+            } as any,
+          );
+          if (prep?.imageMessage) {
+            linkPreview.highQualityThumbnail = prep.imageMessage;
+            // Atualizar jpegThumbnail com a versao gerada pelo Baileys (qualidade certa)
+            if (prep.imageMessage.jpegThumbnail) {
+              linkPreview.jpegThumbnail = Buffer.from(prep.imageMessage.jpegThumbnail);
+            }
+            // previewType=1 obrigatorio pro card grande
+            if (linkPreview.previewType === undefined) linkPreview.previewType = 1;
+          }
+        } catch (err: any) {
+          this.logger.warn(`[linkPreview] upload da thumbnail falhou, usando preview pequeno: ${err?.message}`);
         }
       }
 
@@ -2676,19 +2703,9 @@ export class BaileysStartupService extends ChannelStartupService {
     // Quando ha linkPreview (boolean true ou objeto), usar key 'text' pra Baileys
     // entrar no path de extendedTextMessage e atachar metadata do preview.
     // Sem linkPreview, mantem 'conversation' que vai como messageType=conversation (mais leve).
-    console.log(
-      'LP-PATCH-V9-TEXTMESSAGE-IN linkPreviewType=' + typeof data?.linkPreview,
-      data?.linkPreview && typeof data.linkPreview === 'object' ? Object.keys(data.linkPreview) : data?.linkPreview,
-    );
     const hasLinkPreview =
       data?.linkPreview === true || (typeof data?.linkPreview === 'object' && data.linkPreview !== null);
     const messageContent: any = hasLinkPreview ? { text: data.text } : { conversation: data.text };
-    console.log(
-      'LP-PATCH-V9-TEXTMESSAGE-DECIDE hasLinkPreview=' +
-        hasLinkPreview +
-        ' contentKey=' +
-        Object.keys(messageContent).join(','),
-    );
     return await this.sendMessageWithTyping(
       data.number,
       messageContent,
