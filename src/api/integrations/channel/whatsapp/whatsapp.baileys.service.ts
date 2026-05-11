@@ -2647,9 +2647,20 @@ export class BaileysStartupService extends ChannelStartupService {
       throw new BadRequestException('Text is required');
     }
 
+    // Quando ha linkPreview (boolean true ou objeto), usar key 'text' pra Baileys
+    // entrar no path de extendedTextMessage e atachar metadata do preview.
+    // Sem linkPreview, mantem 'conversation' que vai como messageType=conversation (mais leve).
+    console.log(
+      '[LP-TXT] textMessage linkPreview:',
+      typeof data?.linkPreview,
+      data?.linkPreview && typeof data.linkPreview === 'object' ? Object.keys(data.linkPreview) : data?.linkPreview,
+    );
+    const hasLinkPreview =
+      data?.linkPreview === true || (typeof data?.linkPreview === 'object' && data.linkPreview !== null);
+    const messageContent: any = hasLinkPreview ? { text: data.text } : { conversation: data.text };
     return await this.sendMessageWithTyping(
       data.number,
-      { conversation: data.text },
+      messageContent,
       {
         delay: data?.delay,
         presence: 'composing',
