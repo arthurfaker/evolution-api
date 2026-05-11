@@ -2338,6 +2338,7 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
+      console.log('[LP-DIAG] raw options.linkPreview:', typeof options?.linkPreview, options?.linkPreview && typeof options.linkPreview === 'object' ? Object.keys(options.linkPreview) : options?.linkPreview);
       let linkPreview: any =
         typeof options?.linkPreview === 'object' && options.linkPreview !== null
           ? options.linkPreview
@@ -2345,7 +2346,6 @@ export class BaileysStartupService extends ChannelStartupService {
             ? false
             : undefined;
       // Se vier jpegThumbnail como base64 string (via JSON HTTP), converte pra Buffer
-      // que e o que o Baileys espera no WAUrlInfo
       if (linkPreview && typeof linkPreview === 'object' && typeof linkPreview.jpegThumbnail === 'string') {
         try {
           linkPreview.jpegThumbnail = Buffer.from(linkPreview.jpegThumbnail, 'base64');
@@ -2353,6 +2353,7 @@ export class BaileysStartupService extends ChannelStartupService {
           delete linkPreview.jpegThumbnail;
         }
       }
+      console.log('[LP-DIAG] final linkPreview to Baileys:', linkPreview ? { type: typeof linkPreview, keys: typeof linkPreview === 'object' ? Object.keys(linkPreview) : null, thumbIsBuffer: linkPreview?.jpegThumbnail && Buffer.isBuffer(linkPreview.jpegThumbnail), thumbLen: linkPreview?.jpegThumbnail?.length } : linkPreview);
 
       let quoted: WAMessage;
 
