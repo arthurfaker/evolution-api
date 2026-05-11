@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - feat/link-preview-object
+    tags:
+      - 'linkpreview-*'
   workflow_dispatch:
 
 jobs:
@@ -40,3 +42,4 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/evolution-api:linkpreview
             ghcr.io/${{ github.repository_owner }}/evolution-api:linkpreview-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/evolution-api:${{ github.ref_name }}
