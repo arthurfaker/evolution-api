@@ -2207,9 +2207,14 @@ export class BaileysStartupService extends ChannelStartupService {
       );
     }
 
-    // Path pra textMessage com linkPreview (key 'text' em vez de 'conversation') —
-    // Baileys precisa de 'text' pra gerar extendedTextMessage com metadata de preview.
+    // Path pra textMessage com linkPreview (key 'text' em vez de 'conversation')
     if (message['text']) {
+      console.log(
+        'LP-PATCH-V9-MARKER text-branch-reached lpType=' +
+          typeof linkPreview +
+          ' lpKeys=' +
+          (linkPreview && typeof linkPreview === 'object' ? Object.keys(linkPreview).join(',') : String(linkPreview)),
+      );
       return await this.client.sendMessage(
         sender,
         {
@@ -2672,13 +2677,18 @@ export class BaileysStartupService extends ChannelStartupService {
     // entrar no path de extendedTextMessage e atachar metadata do preview.
     // Sem linkPreview, mantem 'conversation' que vai como messageType=conversation (mais leve).
     console.log(
-      '[LP-TXT] textMessage linkPreview:',
-      typeof data?.linkPreview,
+      'LP-PATCH-V9-TEXTMESSAGE-IN linkPreviewType=' + typeof data?.linkPreview,
       data?.linkPreview && typeof data.linkPreview === 'object' ? Object.keys(data.linkPreview) : data?.linkPreview,
     );
     const hasLinkPreview =
       data?.linkPreview === true || (typeof data?.linkPreview === 'object' && data.linkPreview !== null);
     const messageContent: any = hasLinkPreview ? { text: data.text } : { conversation: data.text };
+    console.log(
+      'LP-PATCH-V9-TEXTMESSAGE-DECIDE hasLinkPreview=' +
+        hasLinkPreview +
+        ' contentKey=' +
+        Object.keys(messageContent).join(','),
+    );
     return await this.sendMessageWithTyping(
       data.number,
       messageContent,
