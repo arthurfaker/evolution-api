@@ -2338,7 +2338,7 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
-      let linkPreview: any =
+      const linkPreview: any =
         typeof options?.linkPreview === 'object' && options.linkPreview !== null
           ? options.linkPreview
           : options?.linkPreview === false
