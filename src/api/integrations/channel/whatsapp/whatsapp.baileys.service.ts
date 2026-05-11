@@ -2338,12 +2338,21 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
-      const linkPreview =
+      let linkPreview: any =
         typeof options?.linkPreview === 'object' && options.linkPreview !== null
           ? options.linkPreview
           : options?.linkPreview === false
             ? false
             : undefined;
+      // Se vier jpegThumbnail como base64 string (via JSON HTTP), converte pra Buffer
+      // que e o que o Baileys espera no WAUrlInfo
+      if (linkPreview && typeof linkPreview === 'object' && typeof linkPreview.jpegThumbnail === 'string') {
+        try {
+          linkPreview.jpegThumbnail = Buffer.from(linkPreview.jpegThumbnail, 'base64');
+        } catch {
+          delete linkPreview.jpegThumbnail;
+        }
+      }
 
       let quoted: WAMessage;
 
