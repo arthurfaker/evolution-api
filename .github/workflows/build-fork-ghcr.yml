@@ -3,6 +3,7 @@ name: Build fork image to GHCR
 on:
   push:
     branches:
+      - main
       - feat/link-preview-object
   workflow_dispatch:
 
