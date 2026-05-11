@@ -15,6 +15,9 @@ COPY ./tsup.config.ts ./
 
 RUN npm ci --silent
 
+COPY ./Docker/scripts ./Docker/scripts
+RUN chmod +x ./Docker/scripts/patch-baileys.sh && ./Docker/scripts/patch-baileys.sh
+
 COPY ./src ./src
 COPY ./public ./public
 COPY ./prisma ./prisma
