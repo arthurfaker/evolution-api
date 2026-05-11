@@ -2338,7 +2338,12 @@ export class BaileysStartupService extends ChannelStartupService {
         }
       }
 
-      const linkPreview = options?.linkPreview != false ? undefined : false;
+      const linkPreview =
+        typeof options?.linkPreview === 'object' && options.linkPreview !== null
+          ? options.linkPreview
+          : options?.linkPreview === false
+            ? false
+            : undefined;
 
       let quoted: WAMessage;
 

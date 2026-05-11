@@ -9,7 +9,7 @@ export class Options {
   delay?: number;
   presence?: WAPresence;
   quoted?: Quoted;
-  linkPreview?: boolean;
+  linkPreview?: boolean | Record<string, any>;
   encoding?: boolean;
   mentionsEveryOne?: boolean;
   mentioned?: string[];
@@ -40,7 +40,7 @@ export class Metadata {
   number: string;
   delay?: number;
   quoted?: Quoted;
-  linkPreview?: boolean;
+  linkPreview?: boolean | Record<string, any>;
   mentionsEveryOne?: boolean;
   mentioned?: string[];
   encoding?: boolean;
