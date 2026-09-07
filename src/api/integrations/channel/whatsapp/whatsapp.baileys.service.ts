@@ -2382,10 +2382,13 @@ export class BaileysStartupService extends ChannelStartupService {
         (linkPreview.thumbnailUrl || linkPreview.image || Buffer.isBuffer(linkPreview.jpegThumbnail))
       ) {
         try {
-          const imageInput =
-            linkPreview.thumbnailUrl || linkPreview.image
-              ? { url: linkPreview.thumbnailUrl || linkPreview.image }
-              : linkPreview.jpegThumbnail;
+          // A miniatura que o chamador mandou tem prioridade sobre a URL: ela ja
+          // vem tratada (fonte grande do marketplace, moldura pra foto comprida
+          // nao ser cortada). Baixar a URL de novo aqui descartava esse trabalho
+          // e usava a variante pequena do og:image.
+          const imageInput = Buffer.isBuffer(linkPreview.jpegThumbnail)
+            ? linkPreview.jpegThumbnail
+            : { url: linkPreview.thumbnailUrl || linkPreview.image };
           const prep: any = await prepareWAMessageMedia(
             { image: imageInput } as any,
             {
@@ -2395,12 +2398,20 @@ export class BaileysStartupService extends ChannelStartupService {
           );
           if (prep?.imageMessage) {
             linkPreview.highQualityThumbnail = prep.imageMessage;
-            // Atualizar jpegThumbnail com a versao gerada pelo Baileys (qualidade certa)
-            if (prep.imageMessage.jpegThumbnail) {
+            // NAO trocar o jpegThumbnail pelo do Baileys: o extractImageThumb dele
+            // gera 32px em qualidade 50 — e o cliente mostra ESSE quando nao
+            // consegue carregar a versao em alta. Era a foto borrada no card.
+            // Manter a do chamador; so preencher se ele nao mandou nenhuma.
+            if (!Buffer.isBuffer(linkPreview.jpegThumbnail) && prep.imageMessage.jpegThumbnail) {
               linkPreview.jpegThumbnail = Buffer.from(prep.imageMessage.jpegThumbnail);
             }
             // previewType=1 obrigatorio pro card grande
             if (linkPreview.previewType === undefined) linkPreview.previewType = 1;
+            this.logger.info(
+              `[linkPreview] thumbnail em alta enviada: directPath=${prep.imageMessage.directPath ? 'sim' : 'NAO'} ` +
+                `${prep.imageMessage.width || '?'}x${prep.imageMessage.height || '?'} ` +
+                `inline=${Buffer.isBuffer(linkPreview.jpegThumbnail) ? linkPreview.jpegThumbnail.length + 'B' : 'nao'}`,
+            );
           }
         } catch (err: any) {
           this.logger.warn(`[linkPreview] upload da thumbnail falhou, usando preview pequeno: ${err?.message}`);
