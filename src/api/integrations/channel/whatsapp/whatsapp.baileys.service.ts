@@ -663,7 +663,11 @@ export class BaileysStartupService extends ChannelStartupService {
 
         const isGroupJid = this.localSettings.groupsIgnore && isJidGroup(jid);
         const isBroadcast = !this.localSettings.readStatus && isJidBroadcast(jid);
-        const isNewsletter = isJidNewsletter(jid);
+        // Canal (newsletter) era ignorado sempre. Com RECEBER_CANAIS=true as
+        // mensagens de canal seguem o fluxo normal e saem no webhook — o Novark
+        // Sender le o canal oficial de cupons do Mercado Livre. Sem a variavel,
+        // o comportamento original fica igual.
+        const isNewsletter = isJidNewsletter(jid) && process.env.RECEBER_CANAIS !== 'true';
 
         return isGroupJid || isBroadcast || isNewsletter;
       },
