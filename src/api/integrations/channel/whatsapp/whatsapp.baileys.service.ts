@@ -114,6 +114,7 @@ import makeWASocket, {
   isJidGroup,
   isJidNewsletter,
   isPnUser,
+  jidDecode,
   jidNormalizedUser,
   makeCacheableSignalKeyStore,
   MessageUpsertType,
@@ -163,6 +164,9 @@ export interface ExtendedIMessageKey extends proto.IMessageKey {
 }
 
 const groupMetadataCache = new CacheService(new CacheEngine(configService, 'groups').getEngine());
+
+/** Validade da lista de participantes em cache (ver getGroupMetadataCache). */
+const GRUPO_META_VALIDADE_MS = 5 * 60 * 1000;
 
 // Adicione a função getVideoDuration no início do arquivo
 async function getVideoDuration(input: Buffer | string | Readable): Promise<number> {
@@ -247,7 +251,18 @@ export class BaileysStartupService extends ChannelStartupService {
 
   private authStateProvider: AuthStateProvider;
   private readonly msgRetryCounterCache: CacheStore = new NodeCache();
-  private readonly userDevicesCache: CacheStore = new NodeCache({ stdTTL: 300000, useClones: false });
+  // Lista de aparelhos de cada contato, usada pra montar o envio (inclusive em
+  // grupo, e inclusive a copia que vai pro proprio celular de quem envia).
+  //
+  // O node-cache conta stdTTL em SEGUNDOS. Estava 300000 — escrito como se
+  // fosse milissegundo — e virava 83 horas: quem trocava de celular,
+  // reinstalava o WhatsApp ou ganhava um aparelho novo ficava ate 3,5 dias sem
+  // receber NADA deste numero, sem nem "Aguardando mensagem" (o aparelho novo
+  // simplesmente nao estava na lista). O padrao do Baileys e 5 minutos
+  // (DEFAULT_CACHE_TTLS.USER_DEVICES = 5 * 60).
+  private readonly userDevicesCache: CacheStore = new NodeCache({ stdTTL: 5 * 60, useClones: false });
+  /** Mensagens de grupo cuja primeira entrega ja foi pro webhook (ver message-receipt.update). */
+  private readonly entregaGrupoAvisada = new NodeCache({ stdTTL: 24 * 60 * 60, checkperiod: 10 * 60 });
   private endSession = false;
   private logBaileys = this.configService.get<Log>('LOG').BAILEYS;
   private eventProcessingQueue: Promise<void> = Promise.resolve();
@@ -553,6 +568,28 @@ export class BaileysStartupService extends ChannelStartupService {
     }
   }
 
+  /**
+   * getMessage que o Baileys usa quando um aparelho pede a mensagem de novo
+   * (nao conseguiu abrir). Depois de 5 minutos o Baileys ja nao tem a mensagem
+   * na memoria e cai aqui. Dois defeitos do getMessage comum nesse caminho:
+   *
+   * - Os campos binarios (mediaKey, fileSha256...) voltam do JSON do banco como
+   *   objeto {"0":..,"1":..}; o protobuf grava isso como 0 bytes, e a foto
+   *   reenviada chega sem chave — nao abre.
+   * - Mensagem que nao esta no banco virava { conversation: '' }: o Baileys
+   *   reenviava uma mensagem VAZIA no lugar da oferta. Sem a mensagem, o certo
+   *   e devolver undefined e o Baileys nao reenvia nada.
+   */
+  private async getMessageParaReenvio(key: proto.IMessageKey): Promise<proto.IMessage | undefined> {
+    try {
+      const msg: any = await this.getMessage(key);
+      if (!msg || (Object.keys(msg).length === 1 && msg.conversation === '')) return undefined;
+      return this.deserializeMessageBuffers(msg);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async defineAuthState() {
     const db = this.configService.get<Database>('DATABASE');
     const cache = this.configService.get<CacheConf>('CACHE');
@@ -646,7 +683,7 @@ export class BaileysStartupService extends ChannelStartupService {
       },
       msgRetryCounterCache: this.msgRetryCounterCache,
       generateHighQualityLinkPreview: true,
-      getMessage: async (key) => (await this.getMessage(key)) as Promise<proto.IMessage>,
+      getMessage: async (key) => (await this.getMessageParaReenvio(key)) as proto.IMessage,
       ...browserOptions,
       markOnlineOnConnect: this.localSettings.alwaysOnline,
       retryRequestDelayMs: 350,
@@ -717,6 +754,39 @@ export class BaileysStartupService extends ChannelStartupService {
       console.log('CB:ack,class:call', packet);
       const payload = { event: 'CB:ack,class:call', packet: packet };
       this.sendDataWebhook(Events.CALL, payload, true, ['websocket']);
+    });
+
+    // Alguem trocou de aparelho (celular novo, WhatsApp reinstalado, aparelho
+    // conectado a mais ou a menos). O Baileys so registra em log; a lista em
+    // cache continuava a antiga, e o aparelho novo ficava sem receber. Aqui a
+    // entrada sai do cache e o proximo envio busca a lista certa.
+    this.client.ws.on('CB:notification,type:devices', (node: any) => {
+      try {
+        const filhos = Array.isArray(node?.content) ? node.content : [];
+        for (const filho of filhos) {
+          for (const jid of [filho?.attrs?.jid, filho?.attrs?.lid]) {
+            const user = jid ? jidDecode(jid)?.user : null;
+            if (user) void this.userDevicesCache.del(user);
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`[aparelhos] nao consegui limpar o cache de aparelhos: ${e?.message}`);
+      }
+    });
+
+    // Recibo do servidor pra mensagem enviada. Em grupo, um "phash" aqui indica
+    // que a lista de participantes/aparelhos que o servidor tem e diferente da
+    // que usamos — ou seja, alguem ficou de fora. O Baileys ignora; registrar e
+    // o que permite medir antes de decidir reenviar.
+    this.client.ws.on('CB:ack,class:message', (node: any) => {
+      const a = node?.attrs || {};
+      if (!a.phash && !a.error) return;
+      if (a.from && isJidGroup(a.from)) {
+        this.logger.warn(
+          `[entrega-grupo] recibo com ${a.error ? `erro=${a.error}` : ''}${a.phash ? ` phash=${a.phash}` : ''} id=${a.id} grupo=${a.from}`,
+        );
+        if (a.phash) void this.updateGroupMetadataCache(a.from);
+      }
     });
 
     this.phoneNumber = number;
@@ -1931,6 +2001,28 @@ export class BaileysStartupService extends ChannelStartupService {
             if (events['message-receipt.update']) {
               const payload = events['message-receipt.update'] as MessageUserReceiptUpdate[];
               const remotesJidMap: Record<string, number> = {};
+
+              // Em grupo o Baileys nao emite messages.update de entrega: manda
+              // um recibo POR PARTICIPANTE aqui, e nada disso saia no webhook.
+              // Quem consome (Novark Sender) nunca via mensagem de grupo
+              // entregue e tratava todo numero de grupo como "mudo". Repassa a
+              // PRIMEIRA entrega de cada mensagem nossa como MESSAGES_UPDATE
+              // DELIVERY_ACK — uma so, pra grupo de 1000 pessoas nao virar 1000
+              // webhooks por oferta.
+              for (const event of payload) {
+                const id = event.key?.id;
+                if (!id || !event.key?.fromMe || typeof event.receipt?.receiptTimestamp !== 'number') continue;
+                if (this.entregaGrupoAvisada.has(id)) continue;
+                this.entregaGrupoAvisada.set(id, true);
+                this.sendDataWebhook(Events.MESSAGES_UPDATE, {
+                  keyId: id,
+                  remoteJid: event.key.remoteJid,
+                  fromMe: true,
+                  participant: event.receipt.userJid,
+                  status: 'DELIVERY_ACK',
+                  instanceId: this.instanceId,
+                });
+              }
 
               for (const event of payload) {
                 if (typeof event.key.remoteJid === 'string' && typeof event.receipt.readTimestamp === 'number') {
@@ -4400,8 +4492,14 @@ export class BaileysStartupService extends ChannelStartupService {
         console.log(`Cache request for group: ${groupJid}`);
         const meta = await groupMetadataCache.get(groupJid);
 
-        if (Date.now() - meta.timestamp > 3600000) {
-          await this.updateGroupMetadataCache(groupJid);
+        // A lista de participantes daqui decide QUEM recebe a mensagem. Com 1h
+        // de validade, quem entrava no grupo passava ate uma hora sem receber
+        // nada (o caso relatado: entrou, as primeiras ofertas nao apareceram,
+        // depois "voltou sozinho"). E mesmo vencida, a versao antiga era
+        // devolvida — a atualizada so valia pro proximo envio.
+        if (Date.now() - meta.timestamp > GRUPO_META_VALIDADE_MS) {
+          const nova = await this.updateGroupMetadataCache(groupJid);
+          if (nova?.participants?.length) return nova;
         }
 
         return meta.data;
