@@ -2469,22 +2469,41 @@ export class BaileysStartupService extends ChannelStartupService {
           delete linkPreview.jpegThumbnail;
         }
       }
+      // jpegThumbnailHd: copia em alta, so pra subir pro CDN. Nao e campo do
+      // WAUrlInfo e nunca pode ir inline — o jpegThumbnail continua sendo a
+      // copia de emergencia, pequena, que o cliente desenha quando nao baixa a
+      // do CDN. Sem os dois campos a mesma imagem tinha que servir aos dois
+      // papeis, e quem ganhava era o inline: o CDN ficava com 560px e o card
+      // grande esticava.
+      let jpegThumbnailHd: Buffer | undefined;
+      if (linkPreview && typeof linkPreview === 'object' && linkPreview.jpegThumbnailHd) {
+        try {
+          jpegThumbnailHd = Buffer.isBuffer(linkPreview.jpegThumbnailHd)
+            ? linkPreview.jpegThumbnailHd
+            : Buffer.from(String(linkPreview.jpegThumbnailHd), 'base64');
+        } catch {
+          jpegThumbnailHd = undefined;
+        }
+        delete linkPreview.jpegThumbnailHd;
+      }
       // Upload da imagem pro CDN WhatsApp pra gerar preview GRANDE (highQualityThumbnail).
       // Se nao conseguir, segue com jpegThumbnail = preview pequeno (fallback).
       if (
         linkPreview &&
         typeof linkPreview === 'object' &&
         !linkPreview.highQualityThumbnail &&
-        (linkPreview.thumbnailUrl || linkPreview.image || Buffer.isBuffer(linkPreview.jpegThumbnail))
+        (jpegThumbnailHd || linkPreview.thumbnailUrl || linkPreview.image || Buffer.isBuffer(linkPreview.jpegThumbnail))
       ) {
         try {
-          // A miniatura que o chamador mandou tem prioridade sobre a URL: ela ja
-          // vem tratada (fonte grande do marketplace, moldura pra foto comprida
-          // nao ser cortada). Baixar a URL de novo aqui descartava esse trabalho
-          // e usava a variante pequena do og:image.
-          const imageInput = Buffer.isBuffer(linkPreview.jpegThumbnail)
-            ? linkPreview.jpegThumbnail
-            : { url: linkPreview.thumbnailUrl || linkPreview.image };
+          // Ordem: a copia em alta primeiro, depois a inline, e a URL so quando
+          // nao veio miniatura nenhuma. Baixar a URL descarta o tratamento que o
+          // chamador ja fez (fonte grande do marketplace, moldura pra foto
+          // comprida nao ser cortada) e pega a variante pequena do og:image.
+          const imageInput = jpegThumbnailHd
+            ? jpegThumbnailHd
+            : Buffer.isBuffer(linkPreview.jpegThumbnail)
+              ? linkPreview.jpegThumbnail
+              : { url: linkPreview.thumbnailUrl || linkPreview.image };
           const prep: any = await prepareWAMessageMedia(
             { image: imageInput } as any,
             {
@@ -2506,6 +2525,7 @@ export class BaileysStartupService extends ChannelStartupService {
             this.logger.info(
               `[linkPreview] thumbnail em alta enviada: directPath=${prep.imageMessage.directPath ? 'sim' : 'NAO'} ` +
                 `${prep.imageMessage.width || '?'}x${prep.imageMessage.height || '?'} ` +
+                `fonte=${jpegThumbnailHd ? 'hd(' + jpegThumbnailHd.length + 'B)' : 'inline'} ` +
                 `inline=${Buffer.isBuffer(linkPreview.jpegThumbnail) ? linkPreview.jpegThumbnail.length + 'B' : 'nao'}`,
             );
           }
